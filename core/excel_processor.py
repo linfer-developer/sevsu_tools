@@ -1,10 +1,11 @@
 import asyncio
 import openpyxl
 
-from typing import Optional
-from core.data_manager import Importer
-from basedate.interface import DatabaseInterface as dbi
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 
+from typing import Optional
+from core.data_manager import DataPreparer
 
 class ExcelFile:
 
@@ -53,7 +54,7 @@ class ExcelFile:
         and methods. 
         """
         await asyncio.gather(*[
-            Worksheet(self, sheetname).import_()
+            Worksheet(excel=self, worksheet_name=sheetname).import_()
             for sheetname in self.sheetnames
                 if sheetname.startswith("уч.н.")])
 
@@ -101,17 +102,17 @@ class Worksheet:
     async def import_(self):
         additional_data = self.excel.website_path.split("/")
         worksheet_number = int(self.worksheet_name.split()[-1])
-        importer = Importer(data=self.worksheet_cache)
-        
+        preparer = DataPreparer(data=self.worksheet_cache)
 
         # Additional data to import
-        importer.additional_data = {
-            "week_number" : worksheet_number, # Excel worksheet number
-            "study_form" : additional_data[0], # Study form
-            "institute" : additional_data[1], # Institute
-            "semester" : additional_data[2], # Semester
-            "full_course_name" : additional_data[3] # Full name of the course
+        preparer.additional_data = {
+            "week_number" : worksheet_number, 
+            "study_form" : additional_data[0], 
+            "institute" : additional_data[1], 
+            "semester" : additional_data[2], 
+            "full_course_name" : additional_data[3] 
         }   
 
-        await importer.async_import_data()
-        print(f'Async import to {self.excel.website_path}. Excel worksheet: {self.worksheet_name}')
+        await preparer.async_import_data()
+        print(f"Async import to {self.excel.website_path}. "
+              f"Excel worksheet: {self.worksheet_name}")

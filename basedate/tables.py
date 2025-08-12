@@ -54,7 +54,7 @@ class Group(Base):
     __tablename__ = 'group'
 
     id: Mapped[int] = mapped_column(primary_key=True) # id
-    course: Mapped[Optional[int]] # Номер курса
+    course: Mapped[Optional[str]] = mapped_column(String(55)) # Номер курса
     study_form: Mapped[Optional[str]] = mapped_column(String(105)) # Студентческая форма обучения
     institute: Mapped[Optional[str]] = mapped_column(String(105)) # Инстутут
     name: Mapped[str] = mapped_column(String(15)) # Шифр группы (ИТ/б-24-2-о)
