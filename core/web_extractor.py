@@ -8,36 +8,35 @@ from bs4 import BeautifulSoup
 from typing import ClassVar, Optional
 
 from core.excel_processor import ExcelFile
+from core.queue_manager import ImportQueues
 from core.config import URL, cookies, headers
-
 
 class Extractor:
 
-    SELECTOR_STUDY_FORM_COLUMN: ClassVar[str] = ".schedule-table__column" 
-    SELECTOR_STUDY_FORM_HEADER: ClassVar[str] = ".schedule-table" \
-                                                "__column-header" 
-    SELECTOR_INSTITUTE_ACCORDION: ClassVar[str] = ".schedule-table" \
-                                                  "__column-body > " \
+    STUDY_FORM_COLUMN: ClassVar[str] = ".schedule-table__column" 
+    STUDY_FORM_HEADER: ClassVar[str] = ".schedule-table__column-header" 
+    inst_ACCORDION: ClassVar[str] = ".schedule-table__column-body > " \
                                                   ".document-accordion" 
-    SELECTOR_INSTITUTE_HEADER: ClassVar[str] = ".document-accordion__header" \
-                                               " > h4" 
-    SELECTOR_SEMESTER_GROUP: ClassVar[str] = "div.document-link__group" 
-    SELECTOR_SEMESTER_TITLE: ClassVar[str] = "h5" 
-    SELECTOR_LINK: ClassVar[str] = "a" 
+    inst_HEADER: ClassVar[str] = ".document-accordion__header > h4" 
+    SEMESTER_GROUP: ClassVar[str] = "div.document-link__group" 
+    SEMESTER_TITLE: ClassVar[str] = "h5" 
+    LINK: ClassVar[str] = "a" 
 
     def __init__(
         self,
         study_form: Optional[str] = None, 
-        institute: Optional[str] = None,
+        inst: Optional[str] = None,
         semester: Optional[str] = None,
         educational_degree: Optional[str] = None, 
-        course: Optional[int] = None
+        course: Optional[int] = None,
+        echo: bool = False
     ):
         self.study_form = study_form 
-        self.institute = institute 
+        self.inst = inst 
         self.semester = semester 
         self.educational_degree = educational_degree 
         self.course = course 
+        self.echo = echo
 
         try: 
             response = requests.get(
@@ -45,7 +44,7 @@ class Extractor:
                 cookies=cookies, 
                 headers=headers
             )
-            self.HTML: str = BeautifulSoup(response.text, "html.parser")
+            self.html: str = BeautifulSoup(response.text, "html.parser")
         except Exception as Error: 
             raise ConnectionError(f"Произошла ошибка подключения "
                                   f"к {URL}. Текст ошибки: \n{Error}")
@@ -59,180 +58,185 @@ class Extractor:
 
     @property
     def study_form_columns(self) -> BeautifulSoup:
-        return self.HTML.select(Extractor.SELECTOR_STUDY_FORM_COLUMN)
+        return self.html.select(Extractor.STUDY_FORM_COLUMN)
 
     def study_form_title(
-        self, 
-        study_form_element: BeautifulSoup
+        self, study_form_el: BeautifulSoup
     ) -> BeautifulSoup:
-        return study_form_element.select(
-            Extractor.SELECTOR_STUDY_FORM_HEADER
+        return study_form_el.select(
+            Extractor.STUDY_FORM_HEADER
         )[0].text.strip() 
 
-    def institutes_elements(
-        self, 
-        study_form_element: BeautifulSoup
+    def inst_els(
+        self, study_form_el: BeautifulSoup
     ) -> BeautifulSoup:
-        return study_form_element.select(
-            Extractor.SELECTOR_INSTITUTE_ACCORDION)
+        return study_form_el.select(
+            Extractor.inst_ACCORDION
+        )
 
-    def institute_title(
-        self, 
-        institute_element: BeautifulSoup
+    def inst_title(
+        self, inst_el: BeautifulSoup
     ) -> BeautifulSoup:
-        return institute_element.select(
-            Extractor.SELECTOR_INSTITUTE_HEADER
-        )[0].text.strip()
+        return inst_el.select(
+            Extractor.inst_HEADER
+        )[0].text.strip() 
 
     def semestr_excels_list(
-        self, 
-        institute_element: BeautifulSoup
+        self, inst_el: BeautifulSoup
     ) -> BeautifulSoup:
-        return institute_element.find_all(
-            "div", class_="document-link__group")
+        return inst_el.find_all(
+            "div", class_="document-link__group"
+        )
 
     def find(self):
         asyncio.run(self.iterate_study_form())
 
     async def iterate_study_form(self) -> Optional[list]:
         tasks: list = []
-        excel_file_website_path = ""
-        
-        for study_form_element in self.study_form_columns:
+        xls_path = ""
 
-            study_form_title = self.study_form_title(study_form_element)
-            institutes_elements = self.institutes_elements(study_form_element)
+        await ImportQueues.start()
+        for el in self.study_form_columns:
+            title = self.study_form_title(study_form_el=el)
+            inst_els = self.inst_els(study_form_el=el)
 
-            if not self.study_form or self.study_form == study_form_title:
-                excel_file_website_path += study_form_title
+            if not self.study_form or self.study_form == title:
+                xls_path += title
 
-                task = asyncio.create_task(self.iterate_institute(
-                    institutes_elements=institutes_elements, 
-                    excel_file_website_path=excel_file_website_path)
-                )
-                print(
-                    f"{id(task)}. Data collection from the student "
-                    f"form \"{study_form_title}\" " 
-                    f"has been started in the iterate_study_form " \
-                    f"method of the web_extractor module.\n"
-                )
+                task = asyncio.create_task(self.iterate_inst(
+                    inst_els=inst_els, 
+                    xls_path=xls_path
+                ))
+
+                if self.echo:
+                    print(
+                        f"{id(task)}. Data collection from the student "
+                        f"form \"{title}\" " 
+                        f"has been started in the iterate_study_form " \
+                        f"method of the web_extractor module.\n"
+                    )
+
                 tasks.append(task)
 
-            excel_file_website_path = excel_file_website_path.replace(
-                study_form_title, ""
-            )
+            xls_path = xls_path.replace(title, "")
 
         await asyncio.gather(*tasks)
+        await ImportQueues.stop()
 
-    async def iterate_institute(
+    async def iterate_inst(
         self, 
-        institutes_elements: BeautifulSoup,
-        excel_file_website_path: str
+        inst_els: BeautifulSoup,
+        xls_path: str
     ) -> Optional[list]:
         tasks: list = []
 
-        for institute_element in institutes_elements:
-    
-            institute_title = self.institute_title(institute_element)
-            semestr_excels_list = self.semestr_excels_list(institute_element)
+        for el in inst_els:
+            title = self.inst_title(inst_el=el)
+            semestr_excels_list = self.semestr_excels_list(inst_el=el)
 
-            if not self.institute or self.institute == institute_title:
-                excel_file_website_path += f"/{institute_title}"
+            if not self.inst or self.inst == title:
+                xls_path += f"/{title}"
 
                 task = asyncio.create_task(self.iterate_semesters(
                     semestr_excels_list=semestr_excels_list, 
-                    excel_file_website_path=excel_file_website_path
+                    xls_path=xls_path
                 ))
-                print(
-                    f"{id(task)}. Data collection was started from "
-                    f"the html element of the institute "
-                    f"\"{institute_title}\" in the iterate_institute "
-                    f"method of the web_extractor module.\n"
-                )
+
+                if self.echo:
+                    print(
+                        f"{id(task)}. Data collection was started from "
+                        f"the html el of the inst "
+                        f"\"{title}\" in the iterate_inst "
+                        f"method of the web_extractor module.\n"
+                    )
+
                 tasks.append(task)
 
-            excel_file_website_path = excel_file_website_path.replace(
-                f"/{institute_title}", ""
-            )
+            xls_path = xls_path.replace(f"/{title}", "")
 
         await asyncio.gather(*tasks)
 
     async def iterate_semesters(
         self, 
         semestr_excels_list: list,
-        excel_file_website_path: str
+        xls_path: str
     ) -> Optional[list]:
         tasks: list = []
 
         for semester in semestr_excels_list:
+            title = semester.find("div").text.strip()
 
-            semester_title = semester.find("div").text.strip()
-            if not self.semester or self.semester == semester_title:
-                excel_file_website_path += f"/{semester_title}"
+            if not self.semester or self.semester == title:
+                xls_path += f"/{title}"
 
                 task = asyncio.create_task(self.iterate_links(
                     semester=semester, 
-                    excel_file_website_path=excel_file_website_path)
-                )
-                print(
-                    f"   {id(task)}. Data collection has started "
-                    f"from the html element of the semester "
-                    f"\"{semester_title}\" in the iterate_semesters " \
-                    f"method of the web_extractor module."
-                )
+                    xls_path=xls_path
+                ))
+
+                if self.echo:
+                    print(
+                        f"{id(task)}. Data collection has started "
+                        f"from the html el of the semester "
+                        f"\"{title}\" in the iterate_semesters " \
+                        f"method of the web_extractor module."
+                    )
+
                 tasks.append(task)
 
-            excel_file_website_path = excel_file_website_path.replace(
-                f"/{semester_title}", ""
-            )
+            xls_path = xls_path.replace(f"/{title}", "")
 
         await asyncio.gather(*tasks)
 
     async def iterate_links(
         self, 
         semester: BeautifulSoup, 
-        excel_file_website_path: str
+        xls_path: str
     ) -> list:
         tasks: list = []
 
         for link in semester.find_all("a"):
             link_name = link.text.strip()
-            excel_file_website_path += f"/{link_name}"
+            xls_path += f"/{link_name}"
 
             if not self.link_name or self.link_name == link_name:
                 url = f"https://sevsu.ru{link.get('href')}"
-                print(f"The collection of links to Excel files " \
-                      f"has started in the iterate_links method "
-                      f"of the web_extractor module. " \
-                      f"Request attempt to {url} ({link_name})")
+
+                if self.echo:
+                    print(
+                        f"The collection of links to Excel files " \
+                        f"has started in the iterate_links method "
+                        f"of the web_extractor module. " \
+                        f"Request attempt to {url} ({link_name})"
+                    )
 
                 try:
                     async with aiohttp.ClientSession() as session:
-                        print(f"An attempt to get an Excel file "
-                              f"({url}) in the iterate_links method " \
-                              f"of the web_extractor module.")
+                        if self.echo:
+                            print(f"An attempt to get an Excel file "
+                                  f"({url}) in the iterate_links method " \
+                                  f"of the web_extractor module.")
+
                         file: BytesIO = await self.file_request(
                             session=session, 
                             url=url
                         )
-
                         task = asyncio.create_task(
                             self.import_excel_file_data(
                                 file=file, 
-                                website_path=excel_file_website_path
+                                website_path=xls_path
                             )
-                        ); tasks.append(task)
+                        )
+                        tasks.append(task)
 
                 except Exception as Error:
                     print(f"Предупреждение об исключении в "
                           f"строке 201: {Error}\n"
                           f"Путь до файла на сайте "
-                          f"СевГУ: {excel_file_website_path}\n"
+                          f"СевГУ: {xls_path}\n"
                           f"URL по которому произашло исключение: {url}\n")
 
-            excel_file_website_path = excel_file_website_path.replace(
-                f"/{link_name}", ""
-            )
+            xls_path = xls_path.replace(f"/{link_name}", "")
 
         await asyncio.gather(*tasks)
 

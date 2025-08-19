@@ -1,26 +1,25 @@
 import asyncio
 import openpyxl
-
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-
 from typing import Optional
+
 from core.data_manager import DataPreparer
 
 class ExcelFile:
 
-    """The ExcelFile class provides tools for working with Excel 
-    a file from the SevSU schedule website.
+    """The ExcelFile class provides tools for working with 
+    Excel a file from the SevSU schedule website.
     website url: https://www.sevsu.ru/univers/shedule/
 
-    It is used for processing Excel files with the university schedule.
+    It is used for processing Excel files with the
+    university schedule.
 
     Attributes
     ----------
     file: IOBytes
         IOBytes object (Excel file).
     website_path: str
-        The path to the Excel file on the website with the SevGU schedule.
+        The path to the Excel file on the website with 
+        the SevGU schedule.
 
     Methods
     -------
@@ -39,14 +38,16 @@ class ExcelFile:
     def __init__(self, file: object, website_path: str):
         self.file = file 
         self.website_path = website_path 
-        self.excel = openpyxl.load_workbook(self.file, read_only=True)
+        self.excel = openpyxl.load_workbook(
+            self.file, read_only=True
+        )
 
     @property
     def sheetnames(self) -> list:
         """Returns a list of worksheet names."""
         return self.excel.sheetnames
 
-    async def async_import(self):
+    async def async_import(self) -> None:
         """Asynchronous import to the database. Creates 
         Worksheet objects and collects data from them.
 
@@ -54,12 +55,18 @@ class ExcelFile:
         and methods. 
         """
         await asyncio.gather(*[
-            Worksheet(excel=self, worksheet_name=sheetname).import_()
+            Worksheet(
+                excel=self, 
+                worksheet_name=sheetname
+            ).import_()
             for sheetname in self.sheetnames
-                if sheetname.startswith("уч.н.")])
+                if sheetname.startswith("уч.н.")
+        ])
 
     def import_(self, data_output) -> Optional[list]:
-        asyncio.run(self.export_date_to_basedate(data_output))
+        asyncio.run(
+            self.export_date_to_basedate(data_output)
+        )
 
 class Worksheet:
 
@@ -88,7 +95,11 @@ class Worksheet:
         the data_manager module.
     """
 
-    def __init__(self, excel: ExcelFile, worksheet_name: str):
+    def __init__(
+        self, 
+        excel: ExcelFile, 
+        worksheet_name: str
+    ):
         self.excel = excel 
         self.worksheet_name = worksheet_name
         self.sheet = self.excel.excel[self.worksheet_name]
@@ -101,18 +112,18 @@ class Worksheet:
 
     async def import_(self):
         additional_data = self.excel.website_path.split("/")
-        worksheet_number = int(self.worksheet_name.split()[-1])
-        preparer = DataPreparer(data=self.worksheet_cache)
-
-        # Additional data to import
-        preparer.additional_data = {
-            "week_number" : worksheet_number, 
-            "study_form" : additional_data[0], 
-            "institute" : additional_data[1], 
-            "semester" : additional_data[2], 
-            "full_course_name" : additional_data[3] 
-        }   
+        worksheet_number = int(
+            self.worksheet_name.split()[-1]
+        )
+        preparer = DataPreparer(
+            data=self.worksheet_cache,
+            additional_data={
+                "week_number" : worksheet_number, 
+                "study_form" : additional_data[0], 
+                "institute" : additional_data[1], 
+                "semester" : additional_data[2], 
+                "full_course_name" : additional_data[3] 
+            }   
+        )
 
         await preparer.async_import_data()
-        print(f"Async import to {self.excel.website_path}. "
-              f"Excel worksheet: {self.worksheet_name}")
