@@ -41,7 +41,8 @@ class Week(Base):
     end_date: Mapped[Optional[str]] = mapped_column(String(15))
     semester: Mapped[Optional[str]] = mapped_column(String(15))
 
-    lessons: Mapped[list["Lesson"]] = relationship("Lesson", back_populates="week") 
+    lessons: Mapped[list["Lesson"]] = relationship("Lesson", 
+                                                   back_populates="week") 
 
     __table_args__ = (UniqueConstraint(
         'number', 'start_date', 'end_date', 'semester', name='uix_week_unique'
@@ -57,7 +58,8 @@ class Group(Base):
     study_form: Mapped[Optional[str]] = mapped_column(String(105))
     institute: Mapped[Optional[str]] = mapped_column(String(105))
 
-    lessons: Mapped[list["Lesson"]] = relationship("Lesson", back_populates="group")
+    lessons: Mapped[list["Lesson"]] = relationship("Lesson", 
+                                                   back_populates="group")
 
     __table_args__ = (UniqueConstraint(
         'name', 'course', 'study_form', 'institute', name='uix_group_unique'

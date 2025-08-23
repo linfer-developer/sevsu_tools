@@ -1,14 +1,14 @@
 import asyncio
 from typing import Optional
-
+from copy import deepcopy as copy
 from database.tables import *
 from database.interface import *
 from core.queue_manager import ImportQueues
 
-from copy import deepcopy as copy
+LESSON_OFFSETS: list = [0, 3, 6]
+COLS_TITLES = ["занятие", "тип", "аудитория"]
 
-
-class DataPreparer:
+class WorksheetCacheHandler:
 
     def __init__(
         self, 
@@ -42,8 +42,8 @@ class DataPreparer:
 
         if self._max_row < 50:
             raise RuntimeError(
-                "Количество рядов рабочего листа " \
-                "Excel файла не может быть меньше 50."
+                "Количество рядов рабочего листа Excel " \
+                "файла не может быть меньше 50."
             )
 
     def _cell(self, row: int, col: int) -> Optional[str]:
@@ -53,27 +53,41 @@ class DataPreparer:
             return None
 
     async def async_import_data(self) -> Optional[list]:
-        row: int = 3 
-        data: dict = {
+        data = dict()
+        await self._import_week(data=data)
+        await self._process_group_cells(data=data)
+
+    async def _import_week(self, data: dict):
+        data.update({
             "week" : {
                 "start_date" : self._start_week_date,
                 "end_date" : self._end_week_date,
                 "semester" : self._semester,
                 "number" : self._week
             }
-        }
+        })
+        print(data)
         await ImportQueues.put_week(data)
 
-        tasks: list = []
+    async def _process_group_cells(
+        self, 
+        data: Optional[dict] = None
+    ) -> None:
+        row: int = 3 # Group headings. Example: "Группа : ИТ/б-24-1-о"
+        tasks = list()
         for col in range(0, self._max_col):
             if self._cell(row, col):
-                task = asyncio.create_task(
-                    self._import_group(
-                        row=row, 
+                # Preparing data inside the method
+                tasks.append(asyncio.create_task(self._import_group(
+                    row=row, col=col, data=data
+                )))
+                tasks.append(asyncio.create_task(
+                    self._process_student_day_cells(
+                        row=row+3, 
                         col=col, 
                         data=copy(data)
                     )
-                ); tasks.append(task)
+                ))
         await asyncio.gather(*tasks)
 
     async def _import_group(
@@ -82,92 +96,125 @@ class DataPreparer:
         col: Optional[str] = None,
         data: Optional[dict] = None
     ) -> None:
-        if self._cell(row, col):
-            group: str = self._cell(row, col).split()[-1]
-            data.update({
-                'group' : {
-                    'name': group, 
-                    'course': self._course, 
-                    'study_form': self._study_form, 
-                    'institute': self._institute
-                }
-            })
-            await ImportQueues.put_group(data)
+        # var group. Example: "ИТ/б-24-1-о"
+        group: str = self._cell(row, col).split()[-1] 
+        data.update({
+            'group' : {
+                'name': group, 
+                'course': self._course, 
+                'study_form': self._study_form, 
+                'institute': self._institute
+            }
+        })
+        print(data)
+        # Note: indirect import via queue
+        await ImportQueues.put_group(data)
 
-            tasks: list = []
-            for offset in range(0, 6):
-                task = asyncio.create_task(
-                    self._call_lesson_iteration(
-                        row=row+3+8*offset,
-                        col=col,
-                        data=copy(data)
-                    )
-                ); tasks.append(task)
-            await asyncio.gather(*tasks)
-
-    async def _call_lesson_iteration(
+    async def _process_student_day_cells(
         self, 
         row: Optional[str] = None, 
         col: Optional[str] = None,
         data: Optional[dict] = None
     ) -> None:
+        tasks = list()
+        # column title: "День"
+        # offset: 6 student days in the table
+        for offset in range(0, 6):
+            # row: indent 3 cells down to get to the first day of the week. 
+            # Next, 8 pairs (the maximum number per day) multiplied by the 
+            # current day of the iteration, where the first day is 0.
+            row = row+8*offset # example: "Понедельник".
+
+            data = self._create_lesson_data(row=row, col=col, data=data)
+            tasks.append(asyncio.create_task(
+                self._process_full_lesson_cells(
+                    row=row,
+                    col=col,
+                    data=copy(data)
+                )
+            ))
+
+        await asyncio.gather(*tasks)
+    
+    def _create_lesson_data(
+        self, 
+        row: Optional[str] = None, 
+        col: Optional[str] = None,
+        data: Optional[dict] = None
+    ) -> dict:
+        """Creates a part of the data in the dictionary (day of the week 
+        and date) for later use in importing the lesson.
+        """
         weekday: str = self._cell(row, col) 
         date: str = self._cell(row, col+1) 
-        data.update({
-            'lesson' : {
-                "weekday" : weekday, 
-                "date" : date
-            }
-        })
+        data.update({'lesson' : {"weekday" : weekday, "date" : date}})
+        print(data)
+        return data
 
+    async def _process_full_lesson_cells(
+        self, 
+        row: Optional[str] = None, 
+        col: Optional[str] = None,
+        data: Optional[dict] = None
+    ):
         tasks: list = []
+        # offset: 8 lessons in the table
         for offset in range(0, 8):
-            task = asyncio.create_task(
-                self._call_import_lesson(
-                    row=row+offset, 
-                    col=col+2,
+            row = row+offset # example: 1
+            col = col+2 # title: "№занятия"
+            tasks.append(asyncio.create_task(
+                self._process_lesson_cell_data(
+                    row=row, 
+                    col=col,
                     data=copy(data),
                 )
-            ); tasks.append(task)
+            ))
         await asyncio.gather(*tasks)
 
-    async def _call_import_lesson(
+    async def _process_lesson_cell_data(
         self, 
         row: Optional[str] = None, 
         col: Optional[str] = None,
         data: Optional[dict] = None,
-    ) -> None:
-        lesson_number: int = self._cell(row, col) 
-        lesson_start_time: str = self._cell(row, col+1) 
-        lesson_name: Optional[str] = None 
-        lesson_type: Optional[str] = None 
-        lesson_classroom: Optional[str] = None 
+    ):
+        number: int = self._cell(row, col) 
+        start_time: str = self._cell(row, col+1) 
+        full_title: Optional[str] = None 
+        type_: Optional[str] = None 
+        classroom: Optional[str] = None 
 
-        tasks: list = []
-        for offset in [0, 3, 6]:
-            if not self._cell(5, col+offset+2):
-                continue
+        tasks: list = list()
+        # offset: 
+        for offset in LESSON_OFFSETS:
+            row_of_title = 5
+            col = col+2+offset
+            if not self._cell(row_of_title, col):
+                break
 
-            col_title: str = self._cell(5, col+offset+2).lower().strip() 
-            if col_title in ["занятие", "тип", "аудитория"]:
+            col_title: str = self._cell(row_of_title, col).lower().strip() 
+            if col_title in COLS_TITLES:
+                col_title_lesson = self._cell(row, col)
+                col_title_type = self._cell(row, col+1)
+                col_title_classroom = self._cell(row, col+2)
 
-                if self._cell(row, col+offset+2):
-                    lesson_name = self._cell(row, col+offset+2).strip()
+                if col_title_lesson:
+                    full_title = col_title_lesson.strip()
 
-                if self._cell(row, col+offset+3):
-                    lesson_type = self._cell(row, col+offset+3).strip()
-                    lesson_classroom = self._cell(row, col+offset+4).strip()
+                if col_title_type:
+                    type_ = col_title_type.strip()
+                    if col_title_classroom:
+                        classroom = col_title_classroom.strip()
 
-                if lesson_name and lesson_type:      
+                if full_title and type_:
                     data['lesson'].update({
-                        "number" : lesson_number, 
-                        "start_time" : lesson_start_time
+                        "number" : number, 
+                        "start_time" : start_time
                     })
-
+                    print(data)
                     task = asyncio.create_task(self._import_lesson(
-                        lesson_name=lesson_name, 
-                        lesson_type=lesson_type, 
-                        lesson_classroom=lesson_classroom, 
+                        title=full_title, 
+                        type_=type_, 
+                        classroom=classroom, 
                         data=copy(data), 
                     ))
                     tasks.append(task)
@@ -176,31 +223,32 @@ class DataPreparer:
 
     async def _import_lesson(
         self, 
-        lesson_name: str,
-        lesson_type: Optional[str] = None,
-        lesson_classroom: Optional[str] = None,
+        title: str,
+        type_: Optional[str] = None,
+        classroom: Optional[str] = None,
         data: Optional[str] = None
     ) -> None:
-        if not(lesson_classroom and lesson_type):
+        if not(classroom and type_):
             data['lesson'].update({
-                "title" : "".join(lesson_name.split(", ")[0:-1]),
-                "teacher" : lesson_name.split(", ")[-1],
-                "type" : lesson_type,
-                "classroom" : lesson_classroom
+                "title" : "".join(title.split(", ")[0:-1]),
+                "teacher" : title.split(", ")[-1],
+                "type" : type_,
+                "classroom" : classroom
             })
-            
-            await ImportQueues.put_lesson(data)
+            print(data)
+            # asyncio.create_task(ImportQueues.put_lesson(data))
 
-        if lesson_classroom and lesson_type:
-            lesson_name = lesson_name.splitlines()
-            lesson_type = lesson_type.splitlines()
-            lesson_classroom = lesson_classroom.splitlines()
+        if classroom and type_:
+            title = title.splitlines()
+            type_ = type_.splitlines()
+            classroom = classroom.splitlines()
 
-            for offset in range(0, len(lesson_name)):
+            for offset in range(0, len(title)):
                 data['lesson'].update({
-                    "title" : "".join(lesson_name[offset].split(", ")[0:-1]),
-                    "teacher" : lesson_name[offset].split(", ")[-1],
-                    "type" : lesson_type[offset],
-                    "classroom" : lesson_classroom[offset]
+                    "title" : "".join(title[offset].split(", ")[0:-1]),
+                    "teacher" : title[offset].split(", ")[-1],
+                    "type" : type_[offset],
+                    "classroom" : classroom[offset]
                 })
-                await ImportQueues.put_lesson(data)
+                print(data)
+                # asyncio.create_task(ImportQueues.put_lesson(data))
