@@ -42,8 +42,6 @@ async def async_xls_request(url: str) -> BytesIO:
             return BytesIO(await response.read())
 
 
-PARAMS: Tuple[str] = ("study_form", "institute", "semester", "course")
-
 class Parser:
 
     # The schedule table includes elements of student forms, institutes, 
@@ -75,11 +73,18 @@ class Parser:
     def __init__(self, **kw: Any):
         """Initialization of the object :class'parser'."""
 
+        FILTRED_PARAMS: Tuple[str] = (
+            "study_form", 
+            "institute", 
+            "semester", 
+            "course"
+        )
+
         self.bs4: BeautifulSoup = BeautifulSoup(_CONTENT, "html.parser")
         self.filters: Dict[str, Any] = dict()
 
         for key, value in kw.items():
-            if key in PARAMS and value:
+            if key in FILTRED_PARAMS and value:
                 self.filters[key] = value
 
     def _apply_filter(self, data: Dict[str, Any]) -> bool:
