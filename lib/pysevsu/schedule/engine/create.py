@@ -39,59 +39,100 @@ class Process:
 
     async def gen_data(self):
         web_parser: Parser = Parser()
+        tasks: List[Coroutine] = list()
 
         async for web in web_parser.start():
-            url = rf"https://www.sevsu.ru{web["excel_url"]}"
+            url: str = rf"https://www.sevsu.ru{web["excel_url"]}"
+            task = asyncio.create_task(self.sheet_an(url, web.copy()))
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
+
+    async def sheet_an(self, url, web):
+        tasks: List[Coroutine] = list()
+
+        try:
+            xls = ExcelFile(await async_xls_request(url)) # Время на запрос
+        except:
+            return
+        async for sheet in xls.async_generate_schedule_worksheets():
             try:
-                xls = ExcelFile(await async_xls_request(url))
-            except:
-                continue
-            async for sheet in xls.async_generate_schedule_worksheets():
-                async for data in sheet.generate_lessons():
+                week = sheet.get_dates_of_the_week() | {
+                    "year" : int(sheet.get_dates_of_the_week()["start_date"].split(".")[-1]),
+                    "title" : sheet.title,
+                    "semester" : get_dict_format_value(web, "semester", "nothing")
+                }
+                task = asyncio.create_task(self.sheet_an_2(
+                    sheet, 
+                    web["study_form"], 
+                    web["institute"], 
+                    web["course"], 
+                    week
+                ))
+                tasks.append(task)
+            except RuntimeError:
+                ...
+        
+        await asyncio.gather(*tasks)
 
-                    titles: List[str] = get_dict_format_value(
-                        data, 
-                        "Занятие",
-                        "splitlines"
+    async def sheet_an_2(self, sheet, study_form, institute, course, week):
+        async for data in sheet.generate_lessons():
+            group = {
+                "name" : data["Группа"],
+                "course" : course,
+                "institute" : institute
+            }
+
+            titles: List[str] = get_dict_format_value(
+                data, 
+                "Занятие",
+                "splitlines"
+            )
+            types: List[str] = get_dict_format_value(
+                data, 
+                "Тип",
+                "splitlines"
+            )
+            classrooms: List[str] = get_dict_format_value(
+                data, 
+                "Аудитория",
+                "splitlines"
+            )
+
+            for index in range(len(titles)):
+                title, teacher = split_title(
+                    get_dict_format_value(
+                        titles, 
+                        index, 
+                        "strip"
                     )
-                    types: List[str] = get_dict_format_value(
-                        data, 
-                        "Тип",
-                        "splitlines"
-                    )
-                    classrooms: List[str] = get_dict_format_value(
-                        data, 
-                        "Аудитория",
-                        "splitlines"
-                    )
+                )
+                type_ = get_dict_format_value(
+                    types, 
+                    index, 
+                    "strip"
+                )
+                classroom = get_dict_format_value(
+                    classrooms, 
+                    index, 
+                    "strip"
+                )
 
-                    for index in range(len(titles)):
-                        title, teacher = split_title(
-                            get_dict_format_value(
-                                titles, 
-                                index, 
-                                "strip"
-                            )
-                        )
-                        type_ = get_dict_format_value(
-                            types, 
-                            index, 
-                            "strip"
-                        )
-                        classroom = get_dict_format_value(
-                            classrooms, 
-                            index, 
-                            "strip"
-                        )
+                data = {
+                    "study_form" : study_form,
+                    "group" : group,
+                    "week" : week,
+                    "weekday" : data["День"],
+                    "date" : data["Дата"],
+                    "number" : data["№занятия"],
+                    "start_time" : data["Время"],
+                    "title" : title,
+                    "teacher" : teacher,
+                    "type" : type_,
+                    "classroom" : classroom
+                }
 
-                        data = {
-                            "title" : title,
-                            "teacher" : teacher,
-                            "type" : type_,
-                            "classroom" : classroom
-                        }
-
-                        print(data)
+                print(data)
 
 def get_dict_format_value(
     dict_: Optional[Dict[Any, Any]], 
