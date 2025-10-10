@@ -76,25 +76,25 @@ class Process:
         await asyncio.gather(*tasks)
 
     async def sheet_an_2(self, sheet, study_form, institute, course, week):
-        async for data in sheet.generate_lessons():
+        async for lesson in sheet.generate_lessons():
             group = {
-                "name" : data["Группа"],
+                "name" : lesson["Группа"],
                 "course" : course,
                 "institute" : institute
             }
 
             titles: List[str] = get_dict_format_value(
-                data, 
+                lesson, 
                 "Занятие",
                 "splitlines"
             )
             types: List[str] = get_dict_format_value(
-                data, 
+                lesson, 
                 "Тип",
                 "splitlines"
             )
             classrooms: List[str] = get_dict_format_value(
-                data, 
+                lesson, 
                 "Аудитория",
                 "splitlines"
             )
@@ -122,16 +122,31 @@ class Process:
                     "study_form" : study_form,
                     "group" : group,
                     "week" : week,
-                    "weekday" : data["День"],
-                    "date" : data["Дата"],
-                    "number" : data["№занятия"],
-                    "start_time" : data["Время"],
+                    "weekday" : get_dict_format_value(
+                        lesson, 
+                        "День", 
+                        "nothing"
+                    ),
+                    "date" : get_dict_format_value(
+                        lesson, 
+                        "Дата", 
+                        "nothing"
+                    ),
+                    "number" : get_dict_format_value(
+                        lesson,
+                        "№занятия", 
+                        "nothing"
+                    ),
+                    "start_time" : get_dict_format_value(
+                        lesson, 
+                        "Время", 
+                        "nothing"
+                    ),
                     "title" : title,
                     "teacher" : teacher,
                     "type" : type_,
                     "classroom" : classroom
                 }
-
                 print(data)
 
 def get_dict_format_value(
