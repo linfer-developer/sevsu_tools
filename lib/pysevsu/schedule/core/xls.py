@@ -185,15 +185,21 @@ class Worksheet:
                     col_title_value = self._cell(5, col) # example: "Занятие"
 
                 value = self._cell(row, col)
-                if value is not None:
+                if value:
                     # example: {..., "Занятие" : "История России"}
                     #          {..., "Занятие" : "История России", Тип : "ПЗ"}
                     data[col_title_value] = str(value).strip()
-                elif value is None:
-                    try:
-                        del data[col_title_value]
-                    except KeyError:
-                        ...
+                elif (
+                    not value and 
+                    col_title_value in (
+                        "Занятие", 
+                        "Тип", 
+                        "Аудитория"
+                    )
+                ): 
+                    try: del data[col_title_value]
+                    except Exception as Error: continue
+
 
                 if (
                     col_title_value == "Аудитория" 
@@ -265,3 +271,7 @@ class Worksheet:
             "start_date" : self._cell(6, 1), 
             "end_date" : self._cell(46, 1)
         }
+    
+
+if __name__ == "__main__":
+    asyncio.create_task()
