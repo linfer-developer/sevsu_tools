@@ -198,7 +198,7 @@ class Worksheet:
                     )
                 ): 
                     try: del data[col_title_value]
-                    except Exception as Error: continue
+                    except Exception: continue
 
 
                 if (
