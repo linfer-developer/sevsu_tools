@@ -43,7 +43,7 @@ class Week(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     year: Mapped[int] = mapped_column(String(15))
     semester: Mapped[Optional[str]] = mapped_column(String(15))
-    number: Mapped[int] = mapped_column(Integer)
+    title: Mapped[int] = mapped_column(Integer)
     start_date: Mapped[Optional[str]] = mapped_column(String(15))
     end_date: Mapped[Optional[str]] = mapped_column(String(15))
 
@@ -52,7 +52,7 @@ class Week(Base):
     ) 
 
     __table_args__ = (UniqueConstraint(
-        'number', 'start_date', 'end_date', name='uix_week_unique'
+        'title', 'start_date', 'end_date', name='uix_week_unique'
     ),)
 
 class Group(Base):

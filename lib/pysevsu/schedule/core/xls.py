@@ -8,6 +8,7 @@ from typing import Dict
 from typing import Any
 from typing import Optional
 from io import BytesIO
+from ..utilites.logger import log
 
 
 class ExcelFile:
@@ -47,6 +48,7 @@ class ExcelFile:
 
         return self.file.sheetnames
 
+    @log
     async def async_generate_schedule_worksheets(self) -> object:
         """Asynchronous import to the database. Creates Worksheet objects and 
         collects data from them.
@@ -126,6 +128,7 @@ class Worksheet:
         except IndexError: 
             return None
 
+    @log
     async def generate_lessons(self) -> object:
         """Generates lesson dictionaries.
 
@@ -212,6 +215,7 @@ class Worksheet:
                     # "Занятие")
                     yield data
 
+    @log
     async def generate_groups(self) -> object:
         """Generates dictionaries of student groups.
 
@@ -247,6 +251,7 @@ class Worksheet:
                     'name' : value.split()[-1]
                 }
 
+    @log
     def get_dates_of_the_week(self) -> Dict[str, str]:
         """Returns the date range of the week, i.e. the start and end dates 
         of the student week. 

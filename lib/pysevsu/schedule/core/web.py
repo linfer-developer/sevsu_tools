@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import requests
+from aiohttp import ClientTimeout
 from io import BytesIO
 from bs4 import BeautifulSoup
 from typing import Dict
@@ -10,6 +11,7 @@ from typing import Any
 from .config import _URL
 from .config import _COOKIES
 from .config import _HEADERS
+from ..utilites.logger import log
 
 
 # Executes an HTTP GET request to the main page of the site and receives the 
@@ -25,6 +27,7 @@ except Exception as err:
         ConnectionError(f"{err}.\nURL: {_URL}.")
     )
 
+@log
 async def async_xls_request(url: str) -> BytesIO:
     """Asynchronously executes a GET request at the URL to an Excel file with 
     a schedule. Important, so that the request content is an xls table.
@@ -35,11 +38,17 @@ async def async_xls_request(url: str) -> BytesIO:
     :rtype: BytesIO
 
     """
-    
-    async with aiohttp.ClientSession() as session:
+
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(limit=200),
+        timeout=ClientTimeout(total=30)
+    ) as session:
         async with session.get(url) as response:
             response.raise_for_status()
             return BytesIO(await response.read())
+
+def sync_xls_request(url: str) -> BytesIO:
+    return BytesIO(requests.get(url=url).text)
 
 
 class Parser:
@@ -101,6 +110,7 @@ class Parser:
 
         return ("study_form", "institute", "semester", "course")
 
+    @log
     async def start(self):
         """Start collecting data from the website, implementing it through the 
         generator.
