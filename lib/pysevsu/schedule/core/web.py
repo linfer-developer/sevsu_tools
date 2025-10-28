@@ -39,10 +39,7 @@ async def async_xls_request(url: str) -> BytesIO:
 
     """
 
-    async with aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(limit=200),
-        timeout=ClientTimeout(total=30)
-    ) as session:
+    async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             response.raise_for_status()
             return BytesIO(await response.read())

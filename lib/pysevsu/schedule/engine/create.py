@@ -69,8 +69,7 @@ class Process:
 
         async for web in web_parser.start():
             url: str = rf"https://www.sevsu.ru{web['excel_url']}"
-            task = asyncio.create_task(self.sheet_an(url, web.copy()))
-            tasks.append(task)
+            await self.sheet_an(url, web.copy())
 
         await asyncio.gather(*tasks)
 
@@ -86,10 +85,9 @@ class Process:
                 year=int(sheet.get_dates_of_the_week()["start_date"].split(".")[-1]),
                 semester=dict_value(web, "semester", "nothing"),
                 title=sheet.title,
-                start_date=sheet.get_dates_of_the_week["start_date"],
-                end_date=sheet.get_dates_of_the_week["end_date"]
+                start_date=sheet.get_dates_of_the_week()["start_date"],
+                end_date=sheet.get_dates_of_the_week()["end_date"]
             )
-            print(week)
             task = asyncio.create_task(self.sheet_an_2(
                 sheet, 
                 web["study_form"], 
@@ -136,7 +134,7 @@ class Process:
                     type_=dict_value(types, index, "strip"),
                     classroom=dict_value(classrooms, index, "strip")
                 )
-                print(lesson)
+                print(lesson.title, group.name)
 
 def dict_value(
     dict_: Optional[Dict[Any, Any]], 
