@@ -22,6 +22,7 @@ class Lesson(Base):
     
     group: Mapped["Group"] = relationship("Group", back_populates="lessons")
     week: Mapped["Week"] = relationship("Week", back_populates="lessons")
+
     weekday: Mapped[str] = mapped_column(String(15))
     date: Mapped[str] = mapped_column(String(15))
     number: Mapped[int] = mapped_column(Integer)
@@ -32,8 +33,17 @@ class Lesson(Base):
     classroom: Mapped[Optional[str]] = mapped_column(String(75))
 
     __table_args__ = (UniqueConstraint(
-        'date', 'group_id', 'week_id', 'weekday', 'number', 
-        'start_time', 'title', 'teacher', 'type_', 'classroom',
+        "study_form",
+        "group_id", 
+        "week_id",
+        "weekday",
+        "date", 
+        "number", 
+        "start_time", 
+        "title", 
+        "teacher", 
+        "type_", 
+        "classroom",
         name='uix_lesson_unique'
     ),)
 
@@ -41,18 +51,21 @@ class Week(Base):
     __tablename__ = 'week'
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    year: Mapped[int] = mapped_column(String(15))
-    semester: Mapped[Optional[str]] = mapped_column(String(15))
-    title: Mapped[int] = mapped_column(Integer)
-    start_date: Mapped[Optional[str]] = mapped_column(String(15))
-    end_date: Mapped[Optional[str]] = mapped_column(String(15))
+    year: Mapped[str] = mapped_column(String(45))
+    semester: Mapped[Optional[str]] = mapped_column(String(45))
+    title: Mapped[str] = mapped_column(String(45))
+    start_date: Mapped[Optional[str]] = mapped_column(String(45))
+    end_date: Mapped[Optional[str]] = mapped_column(String(45))
 
     lessons: Mapped[list["Lesson"]] = relationship(
         "Lesson", back_populates="week"
     ) 
 
     __table_args__ = (UniqueConstraint(
-        'title', 'start_date', 'end_date', name='uix_week_unique'
+        'title', 
+        'start_date', 
+        'end_date', 
+        name='uix_week_unique'
     ),)
 
 class Group(Base):
@@ -60,13 +73,11 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(35))
-    course: Mapped[Optional[str]] = mapped_column(String(55))
+    course: Mapped[Optional[str]] = mapped_column(String(65))
     institute: Mapped[Optional[str]] = mapped_column(String(105))
 
     lessons: Mapped[list["Lesson"]] = relationship(
         "Lesson", back_populates="group"
     )
 
-    __table_args__ = (UniqueConstraint(
-        'name', name='uix_group_unique'
-    ),)
+    __table_args__ = (UniqueConstraint('name', name='uix_group_unique'),)

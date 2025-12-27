@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import Optional
 from typing import Coroutine
 from typing import Tuple
@@ -11,7 +12,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from ..core.web import Parser
 from ..core.web import async_xls_request
-from ..core.web import sync_xls_request
 from ..core.xls import ExcelFile
 from ..core.xls import Worksheet
 from ..database import tables as table
@@ -47,6 +47,12 @@ PARAMS: Tuple[str] = (
     "group"
 )
 
+async def requestbd(objects):
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            session.add_all(objects) 
+
+
 class Process:
 
     def __init__(
@@ -57,6 +63,8 @@ class Process:
     ):
         self.generator_type = generator_type
         self.args = args
+        self._cache: Dict[Any] = dict()
+        self._lock = asyncio.Lock()
 
         for key, value in kwargs.items():
             if key in PARAMS:
@@ -64,103 +72,146 @@ class Process:
 
     @log
     async def gen_data(self):
+        start = datetime.now()
+
         web_parser: Parser = Parser()
         tasks: List[Coroutine] = list()
 
         async for web in web_parser.start():
+            if len(tasks) > 50:
+                await asyncio.gather(*tasks)
+                tasks.clear()
             url: str = rf"https://www.sevsu.ru{web['excel_url']}"
-            await self.sheet_an(url, web.copy())
+            task = asyncio.create_task(self.sheet_an(url, web.copy()))
+            tasks.append(task)
 
         await asyncio.gather(*tasks)
+        end = datetime.now()
+        print(start, end)
 
     @log
-    async def sheet_an(self, url, web):
+    async def sheet_an(self, url, data):
+        try:
+            xls_content = await async_xls_request(url)
+        except:
+            return
+
         tasks: List[Coroutine] = list()
+        db_tasks: List[Coroutine] = list()
+        buffer: List[table.Week] = list()
 
-        xls_content = await async_xls_request(url)
-        xls = ExcelFile(xls_content) 
-
+        xls = ExcelFile(xls_content)
         async for sheet in xls.async_generate_schedule_worksheets():
-            week: table.Week = table.Week(
-                year=int(sheet.get_dates_of_the_week()["start_date"].split(".")[-1]),
-                semester=dict_value(web, "semester", "nothing"),
-                title=sheet.title,
-                start_date=sheet.get_dates_of_the_week()["start_date"],
-                end_date=sheet.get_dates_of_the_week()["end_date"]
-            )
-            task = asyncio.create_task(self.sheet_an_2(
-                sheet, 
-                web["study_form"], 
-                web["institute"], 
-                web["course"], 
-                week
-            ))
+            if not self._cache.get(sheet.title):
+                week: table.Week = table.Week(
+                    year=str(sheet.get_dates_of_the_week()["start_date"]).split(".")[-1],
+                    semester=data.get("semester"),
+                    title=sheet.title,
+                    start_date=str(sheet.get_dates_of_the_week()["start_date"]),
+                    end_date=str(sheet.get_dates_of_the_week()["end_date"])
+                )
+                buffer.append(week)
+                self._cache[sheet.title] = week
+
+            if len(buffer) >= 10:
+                async with AsyncSessionLocal() as session:
+                    async with session.begin():
+                        session.add_all(buffer) 
+
+            data.update({"week" : sheet.title})
+            task = asyncio.create_task(self.sheet_an_2(sheet, data.copy()))
             tasks.append(task)
         
+        if buffer:
+            task = asyncio.create_task(requestbd(buffer))
+            db_tasks.append(task)
+            buffer.clear()
+    
         await asyncio.gather(*tasks)
+        await asyncio.gather(*db_tasks)
 
     @log
     async def sheet_an_2(
         self, 
         sheet: Worksheet, 
-        study_form: Optional[str] = None, 
-        institute: Optional[str] = None, 
-        course: Optional[str] = None, 
-        week: Optional[str] = None
+        data: Dict[Any, Any]
     ) -> ...:
-        async for lesson in sheet.generate_lessons():
-            group: table.Group = table.Group(
-                name=lesson["Группа"],
-                course=course,
-                institute=institute
-            )
+        tasks: List[Coroutine] = list()
+        db_tasks: List[Coroutine] = list()
+        buffer: List[table.Week] = list()
+        async for item in sheet.generate_lessons():
+            if not self._cache.get(item["Группа"]):
+                group: table.Group = table.Group(
+                    name=item["Группа"],
+                    course=data["course"],
+                    institute=data["institute"]
+                )
+                self._cache[item["Группа"]] = group
+                buffer.append(group)
 
-            titles: List[str] = dict_value(lesson, "Занятие", "splitlines")
-            types: List[str] = dict_value(lesson, "Тип", "splitlines")
-            classrooms: List[str] = dict_value(lesson, "Аудитория", "splitlines")
+            if len(buffer) >= 25:
+                async with AsyncSessionLocal() as session:
+                    async with session.begin():
+                        session.add_all(buffer) 
 
-            for index in range(len(titles)):
-                title, teacher = split_title(dict_value(titles, index, "strip"))
+            data.update(item)
+            task = asyncio.create_task(self.sheet_an_3(data.copy()))
+            tasks.append(task)
+
+        if buffer:
+            task = asyncio.create_task(requestbd(buffer))
+            db_tasks.append(task)
+            buffer.clear()
+        
+        await asyncio.gather(*tasks)
+        await asyncio.gather(*db_tasks)
+
+    @log
+    async def sheet_an_3(self, data):
+        buffer: List[table.Week] = list()
+        db_tasks: List[Coroutine] = list()
+
+        titles: Optional[List[str]] = data["Занятие"].splitlines()
+        types: Optional[List[str]] = data["Тип"].splitlines()
+        classrooms: Optional[List[str]] = data["Аудитория"].splitlines() 
+
+        for index in range(len(titles)):
+            title: str = None
+            teacher: str = None
+            if len(titles[index].split(', ')) <= 1:
+                title = titles[index]
+            else:
+                title  = ' '.join(titles[index].split(', ')[0:-1])
+                teacher = str(titles[index].split(', ')[-1])
+            
+            try:
                 lesson: table.Lesson = table.Lesson(
-                    study_form=study_form,
-                    group=group,
-                    week=week,
-                    weekday=dict_value(lesson, "День", "nothing"),
-                    date=dict_value(lesson, "Дата", "nothing"),
-                    number=dict_value(lesson,"№занятия", "nothing"),
-                    start_time=dict_value(lesson, "Время", "nothing"),
+                    study_form=data["study_form"],
+                    group_id=self._cache[data["Группа"]].id,
+                    week_id=self._cache[data["week"]].id,
+                    weekday=data.get("День"),
+                    date=data.get("Дата"),
+                    number=int(data.get("№занятия")),
+                    start_time=data.get("Время"),
                     title=title,
                     teacher=teacher,
-                    type_=dict_value(types, index, "strip"),
-                    classroom=dict_value(classrooms, index, "strip")
+                    type_=types[index] if types else "...",
+                    classroom=classrooms[index] if classrooms else "..."
                 )
-                print(lesson.title, group.name)
+            except:
+                raise RuntimeError(types, classrooms)
+            buffer.append(lesson)
 
-def dict_value(
-    dict_: Optional[Dict[Any, Any]], 
-    value: Any, 
-    action_type: Optional[str] = ...
-    ):
-    try:
-        if dict_[value]:
-            if action_type == "nothing":
-                return dict_[value]
-            if action_type == "strip":
-                return dict_[value].strip()
-            if action_type == "splitlines":
-                return dict_[value].strip().splitlines()
-    except:
-        return "nothing"
+            if len(buffer) >= 500:
+                task = asyncio.create_task(requestbd(buffer))
+                db_tasks.append(task)
 
-def split_title(text: List[str]):
-    title: str = ...
-    teacher: str = ...
-    if len(text.split(', ')) <= 1:
-        title = text
-    else:
-        title  = ' '.join(text.split(', ')[0:-1])
-        teacher = str(text.split(', ')[-1])
-    return title, teacher
+        if buffer:
+            task = asyncio.create_task(requestbd(buffer))
+            db_tasks.append(task)
+            buffer.clear()
+
+        await asyncio.gather(*db_tasks)
 
 if __name__ == "__main__":
     engine: Process = Process(

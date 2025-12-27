@@ -22,7 +22,7 @@ from typing import Dict, Any
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select
-from database.tables import *  # Импорт таблиц ORM
+from ..database.tables import *  # Импорт таблиц ORM
 
 #: URL подключения к базе данных PostgreSQL с использованием asyncpg
 DB_URL = "postgresql+asyncpg://postgres:DrWend228@localhost:5432/schedule"
@@ -71,22 +71,14 @@ async def add_week(data: dict) -> None:
     """
     async with AsyncSessionLocal() as session:
         async with session.begin():
-            item = await session.execute(
-                select(Week).where(
-                    (Week.start_date == data["start_date"]) &
-                    (Week.end_date == data["end_date"]) &
-                    (Week.number == data["number"])
+            session.add(
+                Week(
+                    start_date=data["start_date"],
+                    end_date=data["end_date"],
+                    semester=data["semester"],
+                    number=data["number"]
                 )
             )
-            if not item.scalars().first():
-                session.add(
-                    Week(
-                        start_date=data["start_date"],
-                        end_date=data["end_date"],
-                        semester=data["semester"],
-                        number=data["number"]
-                    )
-                )
 
 async def add_group(data: dict) -> None:
     """
