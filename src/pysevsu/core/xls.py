@@ -56,6 +56,7 @@ class WorksheetConfig:
     subgroup_row: int = 5
     date_start_row: int = 6
     date_end_row: int = 46
+    title_change_point = "подгруппа"
     name_cell_lesson_day: str = "День"
     name_cell_lesson_date: str = "Дата"
     name_cell_lesson_number: str = "№занятия"
@@ -67,7 +68,7 @@ class WorksheetConfig:
 
 @dataclass(frozen=True)
 class DataFields:
-    """Dataclass defining field names for structured data output.
+    """Dataclass defining FIELD names for structured data output.
 
     Used as keys in the resulting dictionaries to maintain consistency
     across the data pipeline.
@@ -86,6 +87,11 @@ class DataFields:
     teacher: str = "lesson_teacher"
     type_: str = "lesson_type"
     classroom: str = "lesson_classroom"
+
+
+FIELD = DataFields
+FILE_CONF = FileConfig
+SHEET_CONF = WorksheetConfig
 
 
 class ExcelFile:
@@ -113,7 +119,7 @@ class ExcelFile:
         :yield: Worksheet objects containing schedule data
         """
         for sheetname in self.file.sheetnames:
-            if sheetname.startswith(FileConfig.sheetname_prefix):
+            if sheetname.startswith(FILE_CONF.sheetname_prefix):
                 yield Worksheet(
                     content=self.file[sheetname],
                 )
@@ -136,10 +142,10 @@ class Worksheet:
         self.title = content.title
         self.data = self.load_cache()
 
-        if self.max_rows < WorksheetConfig.min_worksheet_size:
+        if self.max_rows < SHEET_CONF.min_worksheet_size:
             raise InvalidSheetSizeError(
                 actual_size=self.max_rows,
-                expected_min=WorksheetConfig.min_worksheet_size,
+                expected_min=SHEET_CONF.min_worksheet_size,
                 sheet_name=self.title,
             )
 
@@ -182,9 +188,9 @@ class Worksheet:
 
         :param column: Column index to check
         """
-        title = self._cell(WorksheetConfig.header_row, column)
-        if not title or title.startswith("подгруппа"):
-            title = self._cell(WorksheetConfig.subgroup_row, column)
+        title = self._cell(SHEET_CONF.header_row, column)
+        if not title or title.startswith(SHEET_CONF.title_change_point):
+            title = self._cell(SHEET_CONF.subgroup_row, column)
         return title
 
     def _reset(self, tmp: Dict[str, Any]) -> None:
@@ -195,7 +201,7 @@ class Worksheet:
 
         :param tmp: Temporary dictionary to reset
         """
-        tmp.update({DataFields.type_: "", DataFields.classroom: ""})
+        tmp.update({FIELD.type_: "", FIELD.classroom: ""})
 
     async def run_data_stream(self) -> object:
         """Asynchronous generator extracting structured data from worksheet.
@@ -207,26 +213,28 @@ class Worksheet:
         :yield: Dictionary containing structured lesson data
         """
         wdtm = _WorksheetDataTransferMethods
-        titles_translation = wdtm.get_titles_translation()
-
+        translation = wdtm.translation()
         tmp: Dict[str, Any] = {}
+
         for row in range(self.max_rows):
             for column in range(self.max_columns):
                 group_title_cell = self._cell(3, column)
                 if group_title_cell:
-                    group = group_title_cell.split(":")[-1].strip()
-                    tmp[DataFields.group] = group
+                    group = group_title_cell.split(" : ")[-1].strip()
+                    tmp[FIELD.group] = group
 
                 tmp_title: str = self._get_column_title(column)
-                title: str = titles_translation.get(tmp_title)
                 value: str = str(self._cell(row, column))
                 if value and tmp_title != value:
+                    title: str = translation.get(tmp_title)
                     tmp[title] = value
 
-                    if title == DataFields.title:
+                    if title == FIELD.title:
                         self._reset(tmp)
-                    elif title == DataFields.classroom:
-                        async for result in wdtm.run_cell_processing(tmp.copy()):
+                    elif title == FIELD.classroom:
+                        data = tmp.copy()
+
+                        async for result in wdtm.run_cell_processing(data):
                             yield result
 
     def get_week_info(self) -> Dict[str, str]:
@@ -238,9 +246,9 @@ class Worksheet:
         :return: Dictionary containing week metadata
         """
         return {
-            DataFields.week_title: self.title,
-            DataFields.week_start_date: self._cell(WorksheetConfig.date_start_row, 1),
-            DataFields.week_end_date: self._cell(WorksheetConfig.date_end_row, 1),
+            FIELD.week_title: self.title,
+            FIELD.week_start_date: self._cell(SHEET_CONF.date_start_row, 1),
+            FIELD.week_end_date: self._cell(SHEET_CONF.date_end_row, 1),
         }
 
 
@@ -252,23 +260,23 @@ class _WorksheetDataTransferMethods:
     """
 
     @staticmethod
-    def get_titles_translation() -> Dict[str, str]:
-        """Maps worksheet column titles to standardized field names.
+    def translation() -> Dict[str, str]:
+        """Maps worksheet column titles to standardized FIELD names.
 
-        :return: Dictionary mapping original titles to DataFields keys
+        :return: Dictionary mapping original titles to FIELD keys
         """
         return {
-            WorksheetConfig.name_cell_lesson_day: DataFields.day,
-            WorksheetConfig.name_cell_lesson_date: DataFields.date,
-            WorksheetConfig.name_cell_lesson_number: DataFields.number,
-            WorksheetConfig.name_cell_lesson_start_time: DataFields.start_time,
-            WorksheetConfig.name_cell_lesson_title: DataFields.title,
-            WorksheetConfig.name_cell_lesson_type: DataFields.type_,
-            WorksheetConfig.name_cell_lesson_classroom: DataFields.classroom,
+            SHEET_CONF.name_cell_lesson_day: FIELD.day,
+            SHEET_CONF.name_cell_lesson_date: FIELD.date,
+            SHEET_CONF.name_cell_lesson_number: FIELD.number,
+            SHEET_CONF.name_cell_lesson_start_time: FIELD.start_time,
+            SHEET_CONF.name_cell_lesson_title: FIELD.title,
+            SHEET_CONF.name_cell_lesson_type: FIELD.type_,
+            SHEET_CONF.name_cell_lesson_classroom: FIELD.classroom,
         }
 
-    @staticmethod
-    async def run_cell_processing(tmp: Dict[str, Any]) -> object:
+    @classmethod
+    async def run_cell_processing(cls, tmp: Dict[str, Any]) -> object:
         """Processes complex cell data containing multiple lessons.
 
         Handles cells with multi-line content, splitting and distributing
@@ -277,29 +285,31 @@ class _WorksheetDataTransferMethods:
         :param tmp: Temporary dictionary with initial cell data
         :yield: Processed lesson dictionaries
         """
-        lesson_titles: List[str] = tmp[DataFields.title].strip().splitlines()
-        lesson_types: List[str] = tmp[DataFields.type_].strip().splitlines()
-        lesson_classrooms: List[str] = tmp[DataFields.classroom].strip().splitlines()
-        iteration_length: int = len(lesson_titles)
-        wdtm = _WorksheetDataTransferMethods
+        lesson_titles: List[str] = cls.split_cell_value(tmp[FIELD.title])
+        lesson_types: List[str] = cls.split_cell_value(tmp[FIELD.type_])
+        lesson_classrooms: List[str] = cls.split_cell_value(tmp[FIELD.classroom])
 
+        iteration_length: int = len(lesson_titles)
         for index in range(iteration_length):
-            title, teacher = wdtm.parse_lesson_line(lesson_titles[index])
-            tmp.update({DataFields.title: title, DataFields.teacher: teacher})
-            wdtm.process_string(
+            full_title = lesson_titles[index]
+            title, teacher = cls.parse_lesson_line(full_title)
+            tmp.update({FIELD.title: title, FIELD.teacher: teacher})
+
+            cls.process_string(
                 iteration_length=iteration_length,
                 list_=lesson_types,
                 tmp=tmp,
-                tmp_key=DataFields.type_,
+                tmp_key=FIELD.type_,
                 iteration_index=index,
             )
-            wdtm.process_string(
+            cls.process_string(
                 iteration_length=iteration_length,
                 list_=lesson_classrooms,
                 tmp=tmp,
-                tmp_key=DataFields.classroom,
+                tmp_key=FIELD.classroom,
                 iteration_index=index,
             )
+
             yield tmp
 
     @staticmethod
@@ -341,6 +351,10 @@ class _WorksheetDataTransferMethods:
             tmp[tmp_key] = list_[iteration_index]
             return
         tmp[tmp_key] = "".join(list_)
+
+    @staticmethod
+    def split_cell_value(str_: str) -> List[str]:
+        return str_.strip().splitlines()
 
 
 async def test(url):

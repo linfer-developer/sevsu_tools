@@ -52,6 +52,10 @@ class DataFields:
     file_url: str = "file_url"
 
 
+CONF = Config
+FIELD = DataFields
+
+
 class Document:
     """The Document class provides a method for collecting data from the HTML
     schedule page of Sevastopol State University.
@@ -63,6 +67,10 @@ class Document:
     def __init__(self, content: str) -> None:
         self._bs4: BeautifulSoup = BeautifulSoup(content, "html.parser")
 
+    @staticmethod
+    def _text(str_: str) -> str:
+        return str_.get_text().strip()
+
     async def parse_all(self) -> AsyncIterator[Dict[str, str]]:
         """The generator method collects data from the magic strings specified
         in the Config dataclass. Returns a one-dimensional dictionary with the
@@ -71,22 +79,24 @@ class Document:
         is further used in an asynchronous environment.
         """
         tmp_states: Dict[str, str] = {}
+        text = self._text
+
         for el in self._bs4.descendants:  # descendants is generator, which is faster.
             if hasattr(el, "get"):
                 tag: str = el.name
-                if Config.list_title == tag:
-                    tmp_states[DataFields.list_title] = el.get_text().strip()
-                elif Config.file_url == tag:
-                    tmp_states[DataFields.file_url] = el.get("href")
+                if CONF.list_title == tag:
+                    tmp_states[FIELD.list_title] = text(el)
+                elif CONF.file_url == tag:
+                    tmp_states[FIELD.file_url] = el.get("href")
 
                 classnames: List[str] = el.get("class")
                 if classnames:
-                    if Config.head in classnames:
-                        tmp_states[DataFields.head] = el.get_text().strip()
-                    elif Config.inlist_title in classnames:
-                        tmp_states[DataFields.inlist_title] = el.get_text().strip()
-                    elif Config.filename in classnames:
-                        tmp_states[DataFields.filename] = el.get_text().strip()
+                    if CONF.head in classnames:
+                        tmp_states[FIELD.head] = text(el)
+                    elif CONF.inlist_title in classnames:
+                        tmp_states[FIELD.inlist_title] = text(el)
+                    elif CONF.filename in classnames:
+                        tmp_states[FIELD.filename] = text(el)
                         # The file name is the last element of the nested list
                         # structure. That's why yield is here.
                         yield tmp_states

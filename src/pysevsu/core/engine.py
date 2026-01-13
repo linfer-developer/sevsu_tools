@@ -65,22 +65,20 @@ class BatchCTEExporter:
         """
         for tablename in data:
             tmp: Dict[str, Any] = data[tablename]
+            fields: Dict[str, Any] = tmp["fields"]
             service_information: Dict[str, Any] = tmp["service_information"]
             hashcode: hash = service_information["hashcode"]
-            fields: Dict[str, Any] = tmp["fields"]
-            fields_values: List[Any] = list(fields.values())
 
             if tablename not in self.shared_buffer:
                 keys: List[str] = list(fields.keys())
                 self.shared_buffer[tablename] = {
                     "service_information": service_information,
                     "keys": keys,
-                    "values": [],
+                    "items": [],
                 }
 
             if hashcode not in self.cache:
-                values: List[Any] = fields_values
-                self.shared_buffer[tablename]["values"].append(values)
+                self.shared_buffer[tablename]["items"].append(fields)
                 self.cache.add(hashcode)
                 self.counter += 1
 
@@ -109,9 +107,6 @@ class BatchCTEExporter:
 
         :param items_to_insert: Processed data ready for database insertion
         """
-        if not items_to_insert:
-            return
-
         final_ctes: Set[str] = set()
         tmp_ctes: Set[str] = set()
         for tablename in items_to_insert:
@@ -138,24 +133,14 @@ class BatchCTEExporter:
 
         Constructs INSERT ... ON CONFLICT DO UPDATE statements for independent
         tables, returning generated IDs for use in dependent tables.
-
-        :param tablename: Target database table name
-        :param service_info: Table metadata including unique constraints
-        :param items: Data items to insert
-        :return: Complete CTE SQL statement
         """
-        if not items:
-            return """
-                ids AS (
-                    SELECT NULL::bigint as id, NULL::text as key WHERE FALSE
-                )
-            """
-
-        keys: List[str] = list(items["keys"])
-        values: List[str] = list(items["values"])
+        keys: List[str] = items["keys"]
+        items: List[str] = items["items"]
 
         input_fields: str = ", ".join(keys)
-        values_clause: str = ", ".join([f"({", ".join(value)})" for value in values])
+        values_clause: str = ", ".join(
+            [f"({', '.join(repr(value) for value in item.values())})" for item in items]
+        )
         input_fields_with: str = ", ".join([f"input_item.{key}" for key in keys])
         unique_keys: str = ", ".join(service_info["unique_keys"])
         default_param: str = "year"
@@ -194,16 +179,23 @@ class BatchCTEExporter:
         :return: Complete CTE SQL statement with dependencies
         """
         for tablename in service_info["dependency"]:
-            items["fields"][
-                f"{tablename}_id"
-            ] = f"(SELECT id FROM {tablename}_ids WHERE {tablename}_key = {service_info["dependency"][tablename]})"
+            hash_ = service_info["dependency"][tablename]
+            for item in range(len(items["items"])):
+                items["items"][item][
+                    f"{tablename}_id"
+                ] = f"(SELECT id FROM {tablename}_ids WHERE {tablename}_key = {hash_})"
 
         keys: List[str] = list(items["keys"])
-        values: List[str] = list(items["values"])
+        items: List[str] = list(items["items"])
 
         ctes: str = ", ".join(ctes)
         input_fields: str = ", ".join(keys)
-        values_clause: str = ", ".join([f"({", ".join(value)})" for value in values])
+        values_clause: str = ", ".join(
+            [
+                f"({', '.join(self.quote_value(value) for value in item.values())})"
+                for item in items
+            ]
+        )
         unique_keys: str = ", ".join(service_info["unique_keys"])
 
         sql: str = f"""
@@ -214,6 +206,13 @@ class BatchCTEExporter:
         """
         print(sql)
         return sql
+
+    @staticmethod
+    def quote_value(value: str) -> str:
+        if value.strip().upper().startswith("(SELECT"):
+            return value
+        else:
+            return f'"{value}"'
 
 
 class GlobalDataTransfer:
@@ -238,8 +237,8 @@ class GlobalDataTransfer:
         db_pool_size: int = 20,
         db_max_overflow: int = 40,
         db_sqlalchemy_echo: bool = False,
-        db_import_batch_size: int = 600,
-        db_max_concurrent_batches: int = 2,
+        db_import_batch_size: int = 20,
+        db_max_concurrent_batches: int = 1,
     ) -> None:
         self.requests_limit = asyncio.Semaphore(request_limit)
         self.exporter = BatchCTEExporter(
