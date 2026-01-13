@@ -1,28 +1,14 @@
 import asyncio
-import aiohttp
 import requests
 
-from aiohttp import ClientTimeout
-from io import BytesIO
 from bs4 import BeautifulSoup
-from typing import Optional
 from typing import Dict
-from typing import Tuple
 from typing import Final
 from typing import Any
 
 from .config import _URL
 from .config import _COOKIES
 from .config import _HEADERS
-from ..utilites.logger import log
-
-
-async def async_xls_request(url: str) -> BytesIO:
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            response.raise_for_status()
-            resp = await response.read()
-            return BytesIO(resp)
 
 
 class Parser:
@@ -45,41 +31,45 @@ class Parser:
                 ConnectionError(f"{err}.\nURL: {_URL}.")
             )
 
-        self.bs4: BeautifulSoup = BeautifulSoup(_CONTENT, "html.parser")
+        self._bs4: BeautifulSoup = BeautifulSoup(_CONTENT, "html.parser")
         self.kw = kw
 
     async def run_data_stream(self):
-        table = self.bs4.find('div', class_=Parser._SCHEDULE_TABLE)
+        table = self._bs4.find('div', class_=Parser._SCHEDULE_TABLE)
         res: Dict[str, str] = dict()
 
-        for e in table.descendants:
-            if not hasattr(e, 'get'):
+        for el in table.descendants:
+            if not hasattr(el, 'get'):
                 continue
 
-            classname = e.get("class")
-            tag = e.name
+            classname: str = el.get("class")
+            tag: str = el.name
 
-            if tag == Parser._INSTITUTE_TAG:
-                res["institute"] = e.get_text().strip()
+            match tag:
+                case Parser._INSTITUTE_TAG:
+                    res["institute"] = el.get_text().strip()
+                case Parser._URL_TAG:
+                    res["excel_url"] = el.get("href").strip()
 
             if classname:
                 if Parser._STUDY_FORM_CLASS in classname:
-                    res["study_form"] = e.get_text().strip()
-
-                if Parser._SEMESTER_CLASS in classname:
-                    res["semester"] = e.get_text().strip()
-
-                if tag == Parser._URL_TAG:
-                    res["excel_url"] = e.get("href").strip()
-
-                if Parser._LINK_TITLE in classname:
-                    res["course"] = e.get_text().strip()
+                    res["study_form"] = el.get_text().strip()
+                elif Parser._SEMESTER_CLASS in classname:
+                    res["semester"] = el.get_text().strip()
+                elif Parser._LINK_TITLE in classname:
+                    res["course"] = el.get_text().strip()
                     yield res
                     
                     res.pop("semester", None)
                     res.pop("course", None)
                     res.pop("excel_url", None)
 
-if __name__ == "__main__":
+async def test():
     parser = Parser()
-    asyncio.run(parser.start())
+    count = 0
+    async for button_info in parser.run_data_stream():
+        count += 1
+        print(count, button_info)
+
+if __name__ == "__main__":
+    asyncio.run(test())

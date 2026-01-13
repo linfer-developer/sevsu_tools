@@ -67,7 +67,7 @@ class Worksheet:
         except IndexError: 
             return None
         
-    def _get_column_title(self, col: int):
+    def _get_column_title(self, col: int) -> str:
         title = self._cell(4, col)
         if (
             not title or 
@@ -76,16 +76,16 @@ class Worksheet:
             title = self._cell(5, col)
         return title
     
-    def _process_column_groups(self, col):
+    def _process_column_groups(self, col: int) -> None:
         cell = self._cell(3, col)
         if cell:
             self._result["group"] = cell
 
     @staticmethod
-    def _value_validation(title: str, value: Any):
+    def _value_validation(title: str, value: Any) -> bool:
         return True if value and title != value else False
     
-    def _process_lesson_information(self, title: str, value: Any):
+    def _process_lesson_information(self, title: str, value: Any) -> None:
         if title == "День":
             self._result["weekday"] = value
         if title == "Дата":
@@ -95,7 +95,7 @@ class Worksheet:
         if title == "Время":
             self._result["start_time"] = value
     
-    def _process_lesson_data(self, title: str, value: Any):
+    def _process_lesson_data(self, title: str, value: Any) -> None:
         if title == "Занятие":
             self._tmp["lessons"] = value.splitlines()
             self._tmp.pop("types", None)
@@ -105,7 +105,7 @@ class Worksheet:
         if title == "Аудитория":
             self._tmp["classrooms"] = value.splitlines()
 
-    async def _run_cell_processing(self):
+    async def _run_cell_processing(self) -> object:
         len_: int = len(self._tmp.get("lessons"))
         for index in range(len_):
             title, teacher = self._parse_lesson_line(
@@ -124,7 +124,7 @@ class Worksheet:
                 self._result["type"] = self._tmp["types"][index]
             else:
                 self._result["type"] = ''.join(self._tmp["types"])
-            
+
             yield self._result
 
     async def run_data_stream(self) -> object:
@@ -146,7 +146,7 @@ class Worksheet:
                         self._result.clear()
 
     @staticmethod
-    def _parse_lesson_line(str_: str):
+    def _parse_lesson_line(str_: str) -> str:
         if ', ' in str_:
             tmp = str_.split(', ')
             title = ' '.join(tmp[:-1])
@@ -156,7 +156,8 @@ class Worksheet:
             teacher = ""
         return title, teacher
 
-    def get_dates_of_the_week(self) -> Dict[str, str]:
+    @property
+    def range_of_dates_of_the_week(self) -> Dict[str, str]:
         return {
             "start_date" : self._cell(6, 1), 
             "end_date" : self._cell(46, 1)

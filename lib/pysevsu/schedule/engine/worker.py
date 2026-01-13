@@ -291,9 +291,9 @@ class Engine:
         async with aiohttp.ClientSession() as self._requests_session:
             tasks: List[Coroutine] = list()
             web = Parser()
-            async for i in web.run_data_stream():
+            async for button_data in web.run_data_stream():
                 task = asyncio.create_task(
-                    self._run_xls_files_headler(i.copy())
+                    self._run_xls_files_headler(button_data.copy())
                 )
                 tasks.append(task)
 
@@ -338,8 +338,8 @@ class Engine:
         xls_sheet: Worksheet,
         data: Dict[Any, Any]
     ) -> None:
-        async for i in xls_sheet.run_data_stream():
-            data.update(i)
+        async for lesson in xls_sheet.run_data_stream():
+            data.update(lesson)
             await self._exporter.add(data)
 
 
