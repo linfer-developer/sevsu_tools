@@ -32,7 +32,7 @@ class Produser:
     def __init__(
         self,
         queue: asyncio.Queue,
-        request_limit: int = 10,
+        request_limit: int = 5,
     ) -> None:
         self._queue = queue
         self._requests_limit_value = request_limit
@@ -75,6 +75,8 @@ class Produser:
             return xls.ExcelFile(bin_file)
         except aiohttp.client_exceptions.ClientPayloadError as e:
             print(e)
+        except Exception as e:
+            print(e)
 
     async def _handle_xls_file(
         self, tmp_data: Dict[str, Any], excel_file_url: str
@@ -116,7 +118,7 @@ class Consumer:
         self,
         queue: asyncio.Queue,
         session: object,
-        max_concurrent_batches = 2,
+        max_concurrent_batches = 1,
         batch_size: int = 20,
         cache_size: int = 200000,
     ) -> None:
@@ -168,10 +170,10 @@ class Consumer:
         _cache: Set[object] = set()
 
         for obj in args:
-            obj = _Model(obj)
-            if obj.key not in _cache:
-                _cache.add(obj.key)
-                if obj.has_relationship:
+            model = _Model(obj)
+            if model.key not in _cache:
+                _cache.add(model.key)
+                if model.has_relationship:
                     has_relationships.append(obj)
                 else:
                     no_relationships.append(obj)
@@ -193,32 +195,12 @@ class Consumer:
         _ids: Dict[str, int] = {}
 
         async with self.session() as session:
-            async with session.begin():
-                async for query in _SQLQueryBuilder.build_query(*no_relationships):
-                    stmt = query[0]
-                    keys = query[1]
-                    query = await session.execute(stmt)
-                    result: List[int] = list(query)
-                    _ids.update({
-                        keys[index]: result[index]
-                        for index, _ in enumerate[0](result)
-                    })
-
-            for obj in has_relationships:
-                for relationship in obj.relationships:
-                    print(obj, relationship, _ids.get(obj.key))
-                    setattr(obj, relationship, _ids.get(obj.key))
-
-            async for query in _SQLQueryBuilder.build_query(*has_relationships):
-                async with session.begin():
-                    stmt = query[0]
-                    keys = query[1]
-                    query = await session.execute(stmt)
-                    result: List[int] = list(query)
-                    _ids.update({
-                        keys[index]: result[index]
-                        for index, _ in enumerate[0](result)
-                    })
+            try:
+                session.add_all(no_relationships + has_relationships)
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
 
 class _Model:
@@ -436,8 +418,8 @@ def _create_data_for_export(tmp: Dict[str, Any]) -> Tuple[object]:
     )
     lesson_obj = tables.Lesson(
         study_form=tmp.get(web.DataFields.head, ""),
-        week_id=week_obj,
-        group_id=group_obj,
+        week=week_obj,
+        group=group_obj,
         weekday=tmp.get(xls.DataFields.day, ""),
         date=str(tmp.get(xls.DataFields.date, "")),
         number=tmp.get(xls.DataFields.number, ""),
