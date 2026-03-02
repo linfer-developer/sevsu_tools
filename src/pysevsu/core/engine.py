@@ -20,6 +20,7 @@ from typing import Any, Coroutine, Dict, List, Optional, Set, Tuple, Type
 import aiohttp
 from sqlalchemy import Table, UniqueConstraint, inspect, text
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
 
@@ -130,6 +131,17 @@ class Consumer:
         self.cache: Dict[str, int] = {}
 
     async def stream(self) -> None:
+        graph = batch_exporter._GraphOfTableDependencies(20)
+
+        while True:
+            obj = await self.queue.get()
+            if obj == STOP:
+                break
+            
+            model: batch_exporter._Model = _Model(obj)
+            print(graph.add(model))
+
+    async def stream2(self) -> None:
         args: List[object] = set()
         tasks: List[Coroutine] = []
         query_limit: asyncio.Semaphore = asyncio.Semaphore(
@@ -145,8 +157,7 @@ class Consumer:
             if size >= self.batch_size:
                 kw: List[object] = Consumer.distribute(*args)
                 async with query_limit:
-                    task: Coroutine = asyncio.create_task(self.export(**kw))
-                    tasks.append(task)
+                    await self.export(**kw)
                 args.clear()
 
             args.add(obj)
@@ -155,8 +166,7 @@ class Consumer:
         if args:
             kw: List[object] = Consumer.distribute(*args)
             async with query_limit:
-                task: Coroutine = asyncio.create_task(self.export(**kw))
-                tasks.append(task)
+                await self.export(**kw)
 
         await asyncio.gather(*tasks)
 
@@ -170,10 +180,10 @@ class Consumer:
         _cache: Set[object] = set()
 
         for obj in args:
-            model = _Model(obj)
-            if model.key not in _cache:
-                _cache.add(model.key)
-                if model.has_relationship:
+            obj = _Model(obj)
+            if obj.key not in _cache:
+                _cache.add(obj.key)
+                if obj.has_relationship:
                     has_relationships.append(obj)
                 else:
                     no_relationships.append(obj)
@@ -195,13 +205,32 @@ class Consumer:
         _ids: Dict[str, int] = {}
 
         async with self.session() as session:
-            try:
-                session.add_all(no_relationships + has_relationships)
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
+            async with session.begin():
+                async for query in _SQLQueryBuilder.build_query(*no_relationships):
+                    stmt = query[0]
+                    keys = query[1]
+                    query = await session.execute(stmt)
+                    result: List[int] = list(query)
+                    _ids.update({
+                        keys[index]: result[index]
+                        for index, _ in enumerate[0](result)
+                    })
+                await session.flush()
 
+                for obj in has_relationships:
+                    for relationship in obj.relationships:
+                        print(obj, relationship, _ids.get(obj.key))
+                        setattr(obj, relationship, _ids.get(obj.key))
+
+                async for query in _SQLQueryBuilder.build_query(*has_relationships):
+                    stmt = query[0]
+                    keys = query[1]
+                    query = await session.execute(stmt)
+                    result: List[int] = list(query)
+                    _ids.update({
+                        keys[index]: result[index]
+                        for index, _ in enumerate[0](result)
+                    })
 
 class _Model:
     def __init__(self, obj: object) -> None:
